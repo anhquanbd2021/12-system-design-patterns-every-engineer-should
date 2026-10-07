@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Guide to Trip Line — how the circuit breaker lab reproduces a cascading failure, and which failure each of the 12 patterns prevents.">
+<title>Trip Line Guide — 12 System Design Patterns lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@300..700&display=swap">
+<link rel="stylesheet" href="/styles.css">
+<!-- pb-shell --><link rel="stylesheet" href="./pb-shell.css"><!-- pb-shell --><!-- pb-back --><link rel="stylesheet" href="./pb-back.css"><!-- pb-back --></head>
+<body>
+<a class="skip-link" href="#guide-main">Skip to the guide</a>
+<main id="guide-main">
+  <nav aria-label="Primary"><a href="/">Lab</a><a aria-current="page" href="/guide.html">Guide</a><a href="https://github.com/anhquanbd2021/12-system-design-patterns-every-engineer-should">Source</a></nav>
+
+  <header class="guide-intro">
+    <p class="eyebrow">Wire-by-wire guide</p>
+    <h1>One kill, two endings</h1>
+    <p class="lede">Trip Line replays the same deterministic incident — baseline, kill, heal — under two protection modes. The only variable is whether a circuit breaker sits on the wire. Everything else on this page maps the lab's controls, and each of the 12 patterns, to the failure it prevents.</p>
+    <p class="warning"><strong>Honest limits.</strong> Ticks are simulated, not milliseconds; the fallback is counted, not rendered. The physics are simplified — the state machine is not.</p>
+  </header>
+
+  <section class="panel">
+    <p class="eyebrow">Start here</p>
+    <h2>What this demo proves</h2>
+    <p>Set protection to <em>none</em> and dependency to <em>dead</em>, then Run: the pool saturates past 90%, the queue piles up, and at tick +20 timeouts begin — the cascade flag lights. Now switch protection to <em>breaker</em> and press <strong>Replay incident</strong>: the same kill trips the breaker open after 5 consecutive timeouts, every new request fails fast to the cached fallback, the pool drains, and two healthy probes close the breaker after the heal. Same failure, different ending — the pattern is the difference.</p>
+    <p><a class="try" href="/">Open the lab</a></p>
+  </section>
+
+  <section class="guide-section">
+    <p class="eyebrow">The controls</p>
+    <h2>What each switch demonstrates</h2>
+    <div class="control-grid">
+      <article class="panel control"><span class="control-number">Control 01</span><h3>Kill / Heal dependency</h3><p>Flips the recommendations service between healthy, slow, and dead. Dead sockets never answer — calls park until the 20-tick timeout.</p><dl><dt>Proves</dt><dd>Failure is a property of the dependency, not of your code.</dd><dt>Key detail</dt><dd>Calls keep the mode they were admitted under — a parked socket does not revive on heal.</dd></dl></article>
+      <article class="panel control"><span class="control-number">Control 02</span><h3>Protection: breaker</h3><p>Arms the closed → open → half-open state machine on the wire between caller and dependency.</p><dl><dt>Proves</dt><dd>The caller survives a dead callee — fallbacks, not parked threads.</dd><dt>Key detail</dt><dd>Trips at 5 consecutive timeouts, stays open 40 ticks, then 2 probes decide.</dd></dl></article>
+      <article class="panel control"><span class="control-number">Control 03</span><h3>Retry: immediate</h3><p>Every 6 ticks an unanswered request resends — up to 4 calls each, whether or not the first has a worker. The retry storm.</p><dl><dt>Proves</dt><dd>Retries are load: the backlog balloons ~4× and outlives the heal.</dd><dt>Key detail</dt><dd>A request that resolves suppresses its retries — healthy baseline stays clean.</dd></dl></article>
+      <article class="panel control"><span class="control-number">Control 04</span><h3>Replay incident</h3><p>Runs the scripted kill → heal scenario end-to-end with your current protection and retry settings.</p><dl><dt>Proves</dt><dd>Determinism — UI, CLI, tests, and the article GIF run the identical trace.</dd><dt>Key detail</dt><dd>10 baseline ticks, 60 dead, 80 heal — compare the two runs side by side.</dd></dl></article>
+      <article class="panel control"><span class="control-number">Control 05</span><h3>Trace strip</h3><p>Charts pool saturation and average latency over the last 140 ticks, with timeout markers along the axis.</p><dl><dt>Proves</dt><dd>The cascade draws itself — saturation pins at 100% while latency climbs to timeout.</dd><dt>Key detail</dt><dd>Under the breaker the traces dip, the backlog sheds to fallback, and the wire recovers.</dd></dl></article>
+      <article class="panel control"><span class="control-number">Control 06</span><h3>/api/scenario</h3><p>The server replays any scenario through the same lab module and returns the summary as JSON.</p><dl><dt>Proves</dt><dd>One model, three consumers — browser, CLI, and API agree tick-for-tick.</dd><dt>Key detail</dt><dd>Try <code>/api/scenario?protection=breaker</code> — <code>cascadeTicks</code> comes back 0.</dd></dl></article>
+    </div>
+  </section>
+
+  <section class="guide-section">
+    <p class="eyebrow">The twelve</p>
+    <h2>Every pattern is a failure it prevents</h2>
+    <div class="control-grid">
+      <article class="panel control"><span class="control-number">Pattern 01</span><h3>Load Balancing</h3><p>Health-checked spread across nodes — a balancer keeps any one node from being both the ceiling and the single point of failure.</p><dl><dt>Prevents</dt><dd>node death = outage; saturation while siblings idle.</dd><dt>Anti-pattern</dt><dd>DNS round-robin with no health checks.</dd></dl></article>
+      <article class="panel control"><span class="control-number">Pattern 02</span><h3>Cache-Aside</h3><p>Check the cache first; a miss loads the database once and populates the key.</p><dl><dt>Prevents</dt><dd>every read hitting the DB — 3 ms becomes a 400 ms queue at 5,000 rps.</dd><dt>Anti-pattern</dt><dd>one uniform TTL — the minute-rollover dogpile.</dd></dl></article>
+      <article class="panel control"><span class="control-number">Pattern 03</span><h3>Circuit Breaker</h3><p>The pattern this lab simulates. After N consecutive failures, stop calling, fail fast, probe to recover.</p><dl><dt>Prevents</dt><dd>the 2 a.m. cascade — callers parked on dead sockets.</dd><dt>Anti-pattern</dt><dd>a timeout alone is not a breaker.</dd></dl></article>
+      <article class="panel control"><span class="control-number">Pattern 04</span><h3>Retry + Backoff + Jitter</h3><p>Transient faults deserve retries — with exponential delay, jitter, and a deadline.</p><dl><dt>Prevents</dt><dd>the retry storm flattening a recovering service.</dd><dt>Anti-pattern</dt><dd>a tight <code>for</code> loop that triples load mid-outage.</dd></dl></article>
+      <article class="panel control"><span class="control-number">Pattern 05</span><h3>Rate Limiting</h3><p>Token bucket per client per window; over-limit gets 429 + <code>Retry-After</code>.</p><dl><dt>Prevents</dt><dd>one runaway job starving 400 well-behaved users.</dd><dt>Anti-pattern</dt><dd>a single global limit that still lets one client eat the bucket.</dd></dl></article>
+      <article class="panel control"><span class="control-number">Pattern 06</span><h3>Bulkhead</h3><p>Partition pools per dependency or tenant so one consumer cannot drain the shared pool.</p><dl><dt>Prevents</dt><dd>the nightly batch starving checkout of connections.</dd><dt>Anti-pattern</dt><dd>one 200-connection pool for every call.</dd></dl></article>
+      <article class="panel control"><span class="control-number">Pattern 07</span><h3>API Gateway</h3><p>One entry point owns TLS, authn, routing, and request shaping.</p><dl><dt>Prevents</dt><dd>JWT validation reimplemented twelve ways, one silently wrong.</dd><dt>Anti-pattern</dt><dd>clients calling services directly, concerns duplicated.</dd></dl></article>
+      <article class="panel control"><span class="control-number">Pattern 08</span><h3>Service Discovery</h3><p>Services find each other by name through a registry; instances register and deregister as they scale.</p><dl><dt>Prevents</dt><dd>hardcoded hosts dying with the pod.</dd><dt>Anti-pattern</dt><dd>IP lists in env vars — the new replica nobody routes to.</dd></dl></article>
+      <article class="panel control"><span class="control-number">Pattern 09</span><h3>Pub/Sub</h3><p>The broker buffers work so a slow or dead consumer never blocks or loses the producer's work.</p><dl><dt>Prevents</dt><dd>a dead email service rolling back a paid order.</dd><dt>Anti-pattern</dt><dd>publish-and-forget with no dead-letter queue.</dd></dl></article>
+      <article class="panel control"><span class="control-number">Pattern 10</span><h3>CQRS</h3><p>Split the write model from the read model when their shapes and scales diverge.</p><dl><dt>Prevents</dt><dd>a dashboard GROUP BY locking the writes that make money.</dd><dt>Anti-pattern</dt><dd>CQRS on a three-table CRUD app.</dd></dl></article>
+      <article class="panel control"><span class="control-number">Pattern 11</span><h3>Sharding</h3><p>Split data by a well-chosen key so no single database is the capacity ceiling.</p><dl><dt>Prevents</dt><dd>one Postgres at 2 TB, autovacuum losing the race.</dd><dt>Anti-pattern</dt><dd>sharding on <code>created_at</code> — every write lands on today's shard.</dd></dl></article>
+      <article class="panel control"><span class="control-number">Pattern 12</span><h3>Saga</h3><p>A cross-service transaction is a chain of local transactions, each with a compensating undo.</p><dl><dt>Prevents</dt><dd>charged-but-unshipped orders stranded by a mid-chain crash.</dd><dt>Anti-pattern</dt><dd>pretending the distributed commit exists.</dd></dl></article>
+    </div>
+  </section>
+
+  <section class="guide-section">
+    <p class="eyebrow">Architecture</p>
+    <h2>How the demo is built</h2>
+    <div class="table-wrap panel" tabindex="0" role="region" aria-label="Architecture table — layer, behavior, evidence">
+      <table>
+        <thead><tr><th>Layer</th><th>Behavior</th><th>Evidence</th></tr></thead>
+        <tbody>
+          <tr><td>Simulation</td><td>Deterministic tick loop — pool, queue, timeouts, and the breaker state machine.</td><td><code>public/lab.mjs</code></td></tr>
+          <tr><td>Catalog</td><td>The twelve patterns, each keyed by the failure it prevents.</td><td><code>public/patterns.mjs</code></td></tr>
+          <tr><td>UI</td><td>Single-line diagram, pool strip, phosphor trace, event log.</td><td><code>public/app.js</code></td></tr>
+          <tr><td>Server</td><td>Zero-dependency static host plus /health, /version, /api/patterns, /api/scenario.</td><td><code>app/server.js</code></td></tr>
+          <tr><td>CLI</td><td>Prints the kill/heal trace for both protection modes.</td><td><code>scripts/cascade.mjs</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="guide-section">
+    <p class="eyebrow">Run locally</p>
+    <h2>Replay the incident yourself</h2>
+    <pre class="code-block">npm start          # serve the lab on :3000
+npm test           # simulation, incident, catalog, and HTTP suites
+npm run cascade    # CLI: tick-by-tick trace, both protection modes
+npm run check      # both</pre>
+    <p>Try <code>node scripts/cascade.mjs breaker</code> — the same kill, contained.</p>
+  </section>
+
+  <section class="guide-section panel">
+    <p class="eyebrow">Limits</p>
+    <h2>What this demo does not claim</h2>
+    <ul>
+      <li>Ticks are simulated steps — no real network, sockets, or wall clock.</li>
+      <li>One dependency, one pool, one breaker — real cascades fan out across hops.</li>
+      <li>The fallback is counted, not rendered — a real cache needs its own fill path.</li>
+      <li>"Slow" is a single latency below the timeout; real degradation is a spectrum.</li>
+      <li>A green breaker means "this call path is protected" — never "the system is correct".</li>
+    </ul>
+    <p><a class="try" href="/">Return to Lab</a></p>
+  </section>
+</main>
+<!-- pb-shell --><a class="pb-shell" href="https://github.com/anhquanbd2021/12-system-design-patterns-every-engineer-should" title="12-system-design-patterns-every-engineer-should — an Article Playbook demo (view source)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2" y="2" width="9" height="9" rx="2" fill="#2dd4bf"/><rect x="13" y="2" width="9" height="9" rx="2" fill="#2dd4bf" opacity=".45"/><rect x="2" y="13" width="9" height="9" rx="2" fill="#2dd4bf" opacity=".45"/><rect x="13" y="13" width="9" height="9" rx="4.5" fill="#2dd4bf"/></svg><b>12-system-design-patterns-every-engineer-should</b><i>DEMO</i></a><!-- pb-shell --><!-- pb-back --><a class="pb-back" id="pb-back" href="https://github.com/anhquanbd2021/12-system-design-patterns-every-engineer-should" title="Back to the article — 12-system-design-patterns-every-engineer-should">← Article <i>PLAYBOOK</i></a><script>(function(){var a=document.getElementById('pb-back');if(!a)return;var h=location.hostname;if(/^(localhost|127\.0\.0\.1|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(h)){a.href='//'+h+':'+(/^(localhost|127\.0\.0\.1)$/.test(h)?'1234':'30082')+'/microsites/article.html?slug=12-system-design-patterns-every-engineer-should';}})();</script><!-- pb-back --></body>
+</html>

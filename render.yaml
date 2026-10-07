@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: 12-system-design-patterns-every-engineer-should
+    runtime: node
+    plan: free
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+    buildCommand: npm run check
+    startCommand: npm start
+    healthCheckPath: /health

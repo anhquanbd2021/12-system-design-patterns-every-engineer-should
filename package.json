@@ -1,0 +1,16 @@
+{
+  "name": "12-system-design-patterns-every-engineer-should-demo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "12 System Design Patterns Every Engineer Should Lab — companion interactive demo",
+  "scripts": {
+    "start": "node app/server.js",
+    "cascade": "node scripts/cascade.mjs",
+    "test": "node --test \"test/*.test.mjs\"",
+    "check": "npm test && npm run cascade"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

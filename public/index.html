@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Trip Line — a deterministic circuit-breaker lab: kill the dependency and watch the breaker decide between cascade and containment.">
+  <title>Trip Line — 12 System Design Patterns Every Engineer Should Lab</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@300..700&display=swap">
+  <link rel="stylesheet" href="/styles.css">
+<!-- pb-shell --><link rel="stylesheet" href="./pb-shell.css"><!-- pb-shell --><!-- pb-back --><link rel="stylesheet" href="./pb-back.css"><!-- pb-back --></head>
+<body>
+<a class="skip-link" href="#lab-main">Skip to the lab</a>
+<main id="lab-main">
+  <nav aria-label="Primary"><a aria-current="page" href="/">Lab</a><a href="/guide.html">Guide</a><a href="https://github.com/anhquanbd2021/12-system-design-patterns-every-engineer-should">Source</a></nav>
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Trip Line · one dead dependency, two outcomes</p>
+      <h1>Kill the dependency.<br>The breaker decides the blast radius.</h1>
+      <p class="lede">A storefront calls a recommendations service through a 12-slot worker pool. Flip the dependency to <em>dead</em> and watch calls park on sockets that will never answer — then arm the breaker and replay the same kill.</p>
+    </div>
+    <p class="warning"><strong>Educational model.</strong> A deterministic tick simulation running entirely in your browser — no real services, no real traffic, no wall clock.</p>
+  </header>
+
+  <section class="panel controls" aria-labelledby="controls-title">
+    <div class="section-heading">
+      <div><p class="eyebrow">Incident controls</p><h2 id="controls-title">Wire the call</h2></div>
+      <div class="run-row" role="group" aria-label="Simulation controls">
+        <button id="btn-run" type="button">Run</button>
+        <button id="btn-step" type="button" class="ghost">Step</button>
+        <button id="btn-replay" type="button" class="ghost">Replay incident</button>
+        <button id="btn-reset" type="button" class="ghost">Reset</button>
+      </div>
+    </div>
+    <div class="toggle-row three">
+      <fieldset>
+        <legend>Dependency</legend>
+        <label><input type="radio" name="dep" value="healthy" checked> <span>healthy — answers in 2 ticks</span></label>
+        <label><input type="radio" name="dep" value="slow"> <span>slow — 15 ticks, just under the timeout</span></label>
+        <label><input type="radio" name="dep" value="dead"> <span>dead — sockets never answer</span></label>
+      </fieldset>
+      <fieldset>
+        <legend>Protection</legend>
+        <label><input type="radio" name="protection" value="none" checked> <span>none — every call parks on the socket</span></label>
+        <label><input type="radio" name="protection" value="breaker"> <span>circuit breaker — trips after 5 consecutive failures</span></label>
+      </fieldset>
+      <fieldset>
+        <legend>Retry policy</legend>
+        <label><input type="radio" name="retry" value="none" checked> <span>none — one attempt per request</span></label>
+        <label><input type="radio" name="retry" value="immediate"> <span>immediate — the retry storm (up to 4 calls per request)</span></label>
+      </fieldset>
+    </div>
+    <p class="muted">Try it: protection <em>none</em>, dependency <em>dead</em>, Run — the pool saturates, the queue piles up, timeouts start at tick +20. Then switch protection to <em>breaker</em> and press <strong>Replay incident</strong>: the same kill trips open, fails fast, and half-open probes restore the wire when you heal.</p>
+  </section>
+
+  <section class="panel diagram-panel" aria-labelledby="diagram-title">
+    <div class="section-heading">
+      <div><p class="eyebrow">Single-line diagram</p><h2 id="diagram-title">The wire</h2></div>
+      <span id="status-badge" class="badge" role="status" aria-live="polite">steady</span>
+    </div>
+    <svg id="diagram" viewBox="0 0 960 300" role="img" data-breaker="closed" data-dep="healthy"
+         aria-label="Single-line diagram: storefront service, circuit breaker, recommendations dependency, and a dashed cached-fallback path">
+      <line class="gridline" x1="0" y1="56" x2="960" y2="56"/>
+      <line class="gridline" x1="0" y1="250" x2="960" y2="250"/>
+
+      <path id="wire-fallback" class="wire fallback" d="M480 172 V226" marker-end="url(#fb-arrow)"/>
+      <defs>
+        <marker id="fb-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" class="arrowhead"/>
+        </marker>
+      </defs>
+
+      <line class="wire" x1="210" y1="140" x2="400" y2="140"/>
+      <line class="wire dep-side" x1="560" y1="140" x2="750" y2="140"/>
+
+      <g class="node" id="node-service">
+        <rect x="30" y="100" width="180" height="80" rx="10"/>
+        <text x="120" y="132" class="node-name">storefront</text>
+        <text x="120" y="152" class="node-sub">checkout · catalog · cart</text>
+      </g>
+
+      <g class="node" id="node-dep">
+        <rect x="750" y="100" width="180" height="80" rx="10"/>
+        <text x="840" y="132" class="node-name">recommendations</text>
+        <text x="840" y="152" class="node-sub" id="dep-sub">healthy · 2 ticks</text>
+        <g id="dep-x" aria-hidden="true">
+          <line x1="772" y1="112" x2="908" y2="168"/>
+          <line x1="908" y1="112" x2="772" y2="168"/>
+        </g>
+      </g>
+
+      <g class="node" id="node-fallback">
+        <rect x="390" y="226" width="180" height="56" rx="10"/>
+        <text x="480" y="252" class="node-name">cached fallback</text>
+        <text x="480" y="268" class="node-sub">last good answers</text>
+      </g>
+
+      <g id="breaker" aria-hidden="true">
+        <rect class="breaker-frame" x="392" y="112" width="176" height="56" rx="8"/>
+        <circle class="terminal" cx="400" cy="140" r="5"/>
+        <circle class="terminal" cx="560" cy="140" r="5"/>
+        <line id="breaker-arm" x1="400" y1="140" x2="560" y2="140"/>
+        <circle id="breaker-lamp" cx="480" cy="124" r="6"/>
+        <g id="arc">
+          <line x1="548" y1="116" x2="556" y2="104"/>
+          <line x1="560" y1="112" x2="568" y2="98"/>
+          <line x1="572" y1="118" x2="582" y2="106"/>
+        </g>
+        <text x="480" y="186" class="wire-label" id="breaker-label">circuit breaker</text>
+      </g>
+
+      <text x="300" y="126" class="wire-label">calls</text>
+      <text x="498" y="216" class="wire-label fb-label">fail fast</text>
+
+      <g id="pulses"></g>
+    </svg>
+  </section>
+
+  <section class="workspace" aria-label="Instrumentation">
+    <section class="panel metrics-panel" aria-labelledby="metrics-title">
+      <div class="section-heading"><div><p class="eyebrow">Instrumentation</p><h2 id="metrics-title">Readouts</h2></div></div>
+      <div class="metric-grid" role="group" aria-label="Simulation metrics">
+        <div class="metric"><span class="m-label">tick</span><span class="m-value" id="m-tick">0</span></div>
+        <div class="metric"><span class="m-label">pool</span><span class="m-value" id="m-pool">0/12</span></div>
+        <div class="metric"><span class="m-label">queued</span><span class="m-value" id="m-queue">0</span></div>
+        <div class="metric"><span class="m-label">breaker</span><span class="m-value" id="m-breaker">closed</span></div>
+        <div class="metric"><span class="m-label">avg latency</span><span class="m-value" id="m-lat">0.0t</span></div>
+        <div class="metric"><span class="m-label">timeouts</span><span class="m-value" id="m-timeouts">0</span></div>
+        <div class="metric"><span class="m-label">fallbacks</span><span class="m-value" id="m-fallbacks">0</span></div>
+        <div class="metric"><span class="m-label">err rate</span><span class="m-value" id="m-err">0%</span></div>
+      </div>
+      <p class="eyebrow pool-eyebrow">Worker pool — <span id="pool-pct">0%</span> saturated</p>
+      <div id="pool-strip" class="pool" role="img" aria-label="Worker pool slots"></div>
+    </section>
+
+    <section class="panel trace-panel" aria-labelledby="trace-title">
+      <div class="section-heading"><div><p class="eyebrow">Phosphor trace</p><h2 id="trace-title">Last 140 ticks</h2></div></div>
+      <svg id="trace" viewBox="0 0 640 170" role="img" aria-label="Trace of pool saturation and average latency over the last 140 ticks">
+        <line class="axis" x1="0" y1="140" x2="640" y2="140"/>
+        <text x="4" y="14" class="trace-key sat">pool %</text>
+        <text x="4" y="30" class="trace-key lat">avg latency</text>
+        <text x="596" y="156" class="trace-key dim">t−140 → now</text>
+        <g id="trace-timeouts"></g>
+        <polyline id="trace-lat" points=""/>
+        <polyline id="trace-pool" points=""/>
+      </svg>
+    </section>
+  </section>
+
+  <section class="panel log-panel" aria-labelledby="log-title">
+    <div class="section-heading"><div><p class="eyebrow">Event log</p><h2 id="log-title">What the wire saw</h2></div></div>
+    <ol id="event-log" aria-live="polite"></ol>
+    <p class="muted">Breaker transitions, kills, and heals — the story the postmortem would read.</p>
+  </section>
+
+  <p class="closing-links"><a href="/guide.html">Read the pattern-by-pattern guide</a><span class="sep" aria-hidden="true">·</span><a href="https://github.com/anhquanbd2021/12-system-design-patterns-every-engineer-should">Inspect source and tests</a></p>
+</main>
+<script type="module" src="/app.js"></script>
+<!-- pb-shell --><a class="pb-shell" href="https://github.com/anhquanbd2021/12-system-design-patterns-every-engineer-should" title="12-system-design-patterns-every-engineer-should — an Article Playbook demo (view source)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2" y="2" width="9" height="9" rx="2" fill="#2dd4bf"/><rect x="13" y="2" width="9" height="9" rx="2" fill="#2dd4bf" opacity=".45"/><rect x="2" y="13" width="9" height="9" rx="2" fill="#2dd4bf" opacity=".45"/><rect x="13" y="13" width="9" height="9" rx="4.5" fill="#2dd4bf"/></svg><b>12-system-design-patterns-every-engineer-should</b><i>DEMO</i></a><!-- pb-shell --><!-- pb-back --><a class="pb-back" id="pb-back" href="https://github.com/anhquanbd2021/12-system-design-patterns-every-engineer-should" title="Back to the article — 12-system-design-patterns-every-engineer-should">← Article <i>PLAYBOOK</i></a><script>(function(){var a=document.getElementById('pb-back');if(!a)return;var h=location.hostname;if(/^(localhost|127\.0\.0\.1|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(h)){a.href='//'+h+':'+(/^(localhost|127\.0\.0\.1)$/.test(h)?'1234':'30082')+'/microsites/article.html?slug=12-system-design-patterns-every-engineer-should';}})();</script><!-- pb-back --></body>
+</html>
